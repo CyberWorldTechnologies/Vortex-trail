@@ -5,20 +5,21 @@ import signal
 import threading
 import time
 import sys
+import nmap  # Python-nmap library
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 from pyfiglet import figlet_format
 from colorama import Fore, Style, init
 
-# Initialize colorama
+# Initialize colorama for cross-platform color support
 init()
 
-# Global event to handle CTRL+C
+# Global event to handle stopping threads immediately
 stop_event = threading.Event()
 
 def signal_handler(sig, frame):
     if not stop_event.is_set():
-        print("\n[!] Scan interrupted by user. Stopping all threads...\n")
+        print("\n[!] Scan interrupted by user. Stopping all threads immediately...\n")
         stop_event.set()
         time.sleep(0.5)
         sys.exit(0)
@@ -29,31 +30,6 @@ def display_banner():
     print(Fore.RED + figlet_format("vorteX", font="slant") + Style.RESET_ALL)
     print(f"{Fore.MAGENTA}[✔] vorteX - The Ultimate Recon Tool{Style.RESET_ALL}\n")
 
-# Service name map for known ports
-SERVICE_NAMES = {
-    21: "FTP",
-    22: "SSH",
-    23: "Telnet",
-    25: "SMTP",
-    53: "DNS",
-    80: "HTTP",
-    110: "POP3",
-    443: "HTTPS",
-    3306: "MySQL",
-    3389: "RDP"
-}
-
-def get_service_name(port):
-    return SERVICE_NAMES.get(port, "Unknown")
-
-def grab_banner(sock):
-    try:
-        sock.send(b"HEAD / HTTP/1.1\r\n\r\n")
-        return sock.recv(1024).decode().strip() or "No Banner"
-    except:
-        return "No Banner"
-
-# Subdomain Enumeration
 def check_subdomain(subdomain, progress_bar, output_file):
     if stop_event.is_set():
         return
@@ -83,7 +59,6 @@ def enumerate_subdomains(domain, wordlist, max_threads, output_file):
                 if stop_event.is_set():
                     break
 
-# Directory Fuzzing
 def check_directory(url, progress_bar, output_file):
     if stop_event.is_set():
         return
@@ -114,52 +89,43 @@ def directory_fuzzing(base_url, wordlist, max_threads, output_file):
                 if stop_event.is_set():
                     break
 
-# Advanced Port Scan with Service & Banner Detection
-def scan_port(target, port, protocol, progress_bar, output_file):
-    if stop_event.is_set():
-        return
-    try:
-        sock_type = socket.SOCK_STREAM if protocol == "tcp" else socket.SOCK_DGRAM
-        with socket.socket(socket.AF_INET, sock_type) as sock:
-            sock.settimeout(1)
-            result = sock.connect_ex((target, port))
-
-            if result == 0:
-                service_name = get_service_name(port)
-                banner = grab_banner(sock) if protocol == "tcp" else "N/A"
-
-                result_str = f"[✔] {protocol.upper()} Port {port} OPEN - Service: {service_name}, Banner: {banner}"
-                tqdm.write(f"{Fore.GREEN}{result_str}{Style.RESET_ALL}")
-
-                if output_file:
-                    with open(output_file, "a") as f:
-                        f.write(result_str + "\n")
-    except:
-        pass
-    finally:
-        progress_bar.update(1)
-
-def advanced_port_scan(target, ports, max_threads, output_file, scan_udp):
+# Nmap-based Port Scanning with Service and OS Detection
+def run_nmap_scan(target, ports, output_file, scan_type):
     display_banner()
-    print(f"{Fore.CYAN}[*] Starting advanced port scan on {target} with {max_threads} threads...\n{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}[*] Starting Nmap scan on {target} using '{scan_type}'...\n{Style.RESET_ALL}")
 
-    protocol = "udp" if scan_udp else "tcp"
+    nm = nmap.PortScanner()
 
-    if ports:
-        if '-' in ports:
-            start, end = map(int, ports.split('-'))
-            port_list = range(start, end + 1)
-        else:
-            port_list = [int(p.strip()) for p in ports.split(",")]
-    else:
-        port_list = range(1, 65536)
+    ports_string = ports if ports else "1-65535"  # Scan all ports if none specified
 
-    with tqdm(total=len(port_list), desc=f"{protocol.upper()} Scan", bar_format="{l_bar}{bar} {n_fmt}/{total_fmt} [{elapsed}]", ncols=80) as progress_bar:
-        with ThreadPoolExecutor(max_workers=max_threads) as executor:
-            futures = {executor.submit(scan_port, target, port, protocol, progress_bar, output_file) for port in port_list}
-            for _ in as_completed(futures):
-                if stop_event.is_set():
-                    break
+    try:
+        nm.scan(hosts=target, ports=ports_string, arguments=scan_type)
+
+        for host in nm.all_hosts():
+            tqdm.write(f"{Fore.CYAN}[+] Host: {host} ({nm[host].hostname()}){Style.RESET_ALL}")
+            tqdm.write(f"{Fore.CYAN}[+] State: {nm[host].state()}{Style.RESET_ALL}")
+
+            if 'osmatch' in nm[host]:
+                for osmatch in nm[host]['osmatch']:
+                    tqdm.write(f"{Fore.YELLOW}[+] OS Match: {osmatch['name']} (Accuracy: {osmatch['accuracy']}%) {Style.RESET_ALL}")
+
+            for proto in nm[host].all_protocols():
+                tqdm.write(f"{Fore.CYAN}[+] Protocol: {proto}{Style.RESET_ALL}")
+                ports = nm[host][proto].keys()
+
+                for port in sorted(ports):
+                    port_info = nm[host][proto][port]
+                    result = f"[✔] Port {port}/{proto} - State: {port_info['state']} - Service: {port_info.get('name', 'unknown')}"
+                    tqdm.write(f"{Fore.GREEN}{result}{Style.RESET_ALL}")
+
+                    if output_file:
+                        with open(output_file, "a") as f:
+                            f.write(result + "\n")
+
+    except nmap.PortScannerError as e:
+        tqdm.write(f"{Fore.RED}[!] Nmap scan failed: {e}{Style.RESET_ALL}")
+    except Exception as e:
+        tqdm.write(f"{Fore.RED}[!] Unexpected error: {e}{Style.RESET_ALL}")
 
 # CLI Argument Parsing
 if __name__ == "__main__":
@@ -168,12 +134,16 @@ if __name__ == "__main__":
     parser.add_argument("-w", "--wordlist", help="Path to wordlist (for subdomains or directories)")
     parser.add_argument("-T", "--threads", type=int, default=10, help="Number of threads (default: 10)")
     parser.add_argument("-o", "--output", help="Save results to a file")
+
+    # Directory Fuzzing
     parser.add_argument("-url", "--target", help="Target URL for directory fuzzing")
     parser.add_argument("-fuzz", "--fuzzing", action="store_true", help="Enable directory fuzzing")
-    parser.add_argument("-pscan", "--portscan", action="store_true", help="Enable port scanning")
+
+    # Port Scanning
+    parser.add_argument("-pscan", "--portscan", action="store_true", help="Enable port scanning using Nmap")
     parser.add_argument("-pt", "--porttarget", help="Target IP or domain for port scanning")
     parser.add_argument("-p", "--ports", help="Comma-separated list of ports or range (e.g., 22,80,443 or 1-50)")
-    parser.add_argument("--udp", action="store_true", help="Enable UDP scan (default is TCP)")
+    parser.add_argument("--scantype", help="Nmap scan types (e.g., '-sS -sV -O') - Pass as a single string in quotes")
 
     args = parser.parse_args()
 
@@ -181,7 +151,7 @@ if __name__ == "__main__":
         enumerate_subdomains(args.domain, args.wordlist, args.threads, args.output)
     elif args.target and args.fuzzing and args.wordlist:
         directory_fuzzing(args.target, args.wordlist, args.threads, args.output)
-    elif args.portscan and args.porttarget:
-        advanced_port_scan(args.porttarget, args.ports, args.threads, args.output, args.udp)
+    elif args.portscan and args.porttarget and args.scantype:
+        run_nmap_scan(args.porttarget, args.ports, args.output, args.scantype)
     else:
-        print(f"{Fore.RED}[!] Invalid argument combination.{Style.RESET_ALL}")
+        print(f"{Fore.RED}[!] Invalid argument combination. Use -h for help.{Style.RESET_ALL}")
