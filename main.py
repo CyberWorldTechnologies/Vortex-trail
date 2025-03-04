@@ -89,17 +89,24 @@ def directory_fuzzing(base_url, wordlist, max_threads, output_file):
                 if stop_event.is_set():
                     break
 
-# Nmap-based Port Scanning with Service and OS Detection
-def run_nmap_scan(target, ports, output_file, scan_type):
+# Nmap-based Port Scanning with Service, OS Detection, and NSE
+def run_nmap_scan(target, ports, output_file, scantype=None, nse_script=None):
     display_banner()
-    print(f"{Fore.CYAN}[*] Starting Nmap scan on {target} using '{scan_type}'...\n{Style.RESET_ALL}")
+
+    scan_type_str = scantype if scantype else ""  # Handle None case
+    arguments = scan_type_str.strip()
+
+    if nse_script:
+        arguments += f" --script={nse_script}"
+
+    print(f"{Fore.CYAN}[*] Starting Nmap scan on {target} using '{arguments}'...\n{Style.RESET_ALL}")
 
     nm = nmap.PortScanner()
 
-    ports_string = ports if ports else "1-65535"  # Scan all ports if none specified
+    ports_string = ports if ports else "1-65535"
 
     try:
-        nm.scan(hosts=target, ports=ports_string, arguments=scan_type)
+        nm.scan(hosts=target, ports=ports_string, arguments=arguments)
 
         for host in nm.all_hosts():
             tqdm.write(f"{Fore.CYAN}[+] Host: {host} ({nm[host].hostname()}){Style.RESET_ALL}")
@@ -111,13 +118,10 @@ def run_nmap_scan(target, ports, output_file, scan_type):
 
             for proto in nm[host].all_protocols():
                 tqdm.write(f"{Fore.CYAN}[+] Protocol: {proto}{Style.RESET_ALL}")
-                ports = nm[host][proto].keys()
-
-                for port in sorted(ports):
+                for port in nm[host][proto]:
                     port_info = nm[host][proto][port]
                     result = f"[✔] Port {port}/{proto} - State: {port_info['state']} - Service: {port_info.get('name', 'unknown')}"
                     tqdm.write(f"{Fore.GREEN}{result}{Style.RESET_ALL}")
-
                     if output_file:
                         with open(output_file, "a") as f:
                             f.write(result + "\n")
@@ -126,6 +130,7 @@ def run_nmap_scan(target, ports, output_file, scan_type):
         tqdm.write(f"{Fore.RED}[!] Nmap scan failed: {e}{Style.RESET_ALL}")
     except Exception as e:
         tqdm.write(f"{Fore.RED}[!] Unexpected error: {e}{Style.RESET_ALL}")
+
 
 # CLI Argument Parsing
 if __name__ == "__main__":
@@ -143,15 +148,24 @@ if __name__ == "__main__":
     parser.add_argument("-pscan", "--portscan", action="store_true", help="Enable port scanning using Nmap")
     parser.add_argument("-pt", "--porttarget", help="Target IP or domain for port scanning")
     parser.add_argument("-p", "--ports", help="Comma-separated list of ports or range (e.g., 22,80,443 or 1-50)")
-    parser.add_argument("--scantype", help="Nmap scan types (e.g., '-sS -sV -O') - Pass as a single string in quotes")
+    parser.add_argument("--scantype", help="Nmap scan types (e.g., '-sS -sV -O')")
+    parser.add_argument("--nse", help="NSE script or category (e.g., 'http-title' or 'vuln')")
 
     args = parser.parse_args()
 
     if args.domain and args.wordlist:
         enumerate_subdomains(args.domain, args.wordlist, args.threads, args.output)
+
     elif args.target and args.fuzzing and args.wordlist:
         directory_fuzzing(args.target, args.wordlist, args.threads, args.output)
-    elif args.portscan and args.porttarget and args.scantype:
-        run_nmap_scan(args.porttarget, args.ports, args.output, args.scantype)
+
+    elif args.portscan and args.porttarget:
+        if args.nse:
+            run_nmap_scan(args.porttarget, args.ports, args.output, args.scantype, args.nse)
+        elif args.scantype:
+            run_nmap_scan(args.porttarget, args.ports, args.output, args.scantype)
+        else:
+            print(f"{Fore.RED}[!] Missing scan type or NSE script for port scanning.{Style.RESET_ALL}")
+
     else:
         print(f"{Fore.RED}[!] Invalid argument combination. Use -h for help.{Style.RESET_ALL}")
