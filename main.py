@@ -5,9 +5,11 @@ import signal
 import threading
 import time
 import sys
-import nmap  # Python-nmap library
+import nmap
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
+from bs4 import BeautifulSoup
+from urllib.parse import urlparse, urljoin
 from pyfiglet import figlet_format
 from colorama import Fore, Style, init
 
@@ -30,6 +32,7 @@ def display_banner():
     print(Fore.RED + figlet_format("vorteX", font="slant") + Style.RESET_ALL)
     print(f"{Fore.MAGENTA}[✔] vorteX - The Ultimate Recon Tool{Style.RESET_ALL}\n")
 
+# Subdomain Enumeration
 def check_subdomain(subdomain, progress_bar, output_file):
     if stop_event.is_set():
         return
@@ -59,6 +62,7 @@ def enumerate_subdomains(domain, wordlist, max_threads, output_file):
                 if stop_event.is_set():
                     break
 
+# Directory Fuzzing
 def check_directory(url, progress_bar, output_file):
     if stop_event.is_set():
         return
@@ -93,7 +97,7 @@ def directory_fuzzing(base_url, wordlist, max_threads, output_file):
 def run_nmap_scan(target, ports, output_file, scantype=None, nse_script=None):
     display_banner()
 
-    scan_type_str = scantype if scantype else ""  # Handle None case
+    scan_type_str = scantype if scantype else ""
     arguments = scan_type_str.strip()
 
     if nse_script:
@@ -102,7 +106,6 @@ def run_nmap_scan(target, ports, output_file, scantype=None, nse_script=None):
     print(f"{Fore.CYAN}[*] Starting Nmap scan on {target} using '{arguments}'...\n{Style.RESET_ALL}")
 
     nm = nmap.PortScanner()
-
     ports_string = ports if ports else "1-65535"
 
     try:
@@ -131,6 +134,57 @@ def run_nmap_scan(target, ports, output_file, scantype=None, nse_script=None):
     except Exception as e:
         tqdm.write(f"{Fore.RED}[!] Unexpected error: {e}{Style.RESET_ALL}")
 
+# Web Crawler for Third-Party Links
+def crawl_domain(target_url, depth, output_file):
+    display_banner()
+    print(f"{Fore.CYAN}[*] Crawling domain {target_url} to find third-party links...{Style.RESET_ALL}\n")
+
+    visited_links = set()
+    internal_links = set()
+    external_links = set()
+    base_domain = urlparse(target_url).netloc
+
+    def fetch_links(url):
+        if url in visited_links or stop_event.is_set():
+            return
+
+        visited_links.add(url)
+        try:
+            response = requests.get(url, timeout=5)
+            if response.status_code != 200:
+                return
+            soup = BeautifulSoup(response.text, "html.parser")
+
+            for link in soup.find_all("a", href=True):
+                full_url = urljoin(url, link["href"])
+                parsed_url = urlparse(full_url)
+
+                if base_domain in parsed_url.netloc:
+                    internal_links.add(full_url)
+                else:
+                    external_links.add(full_url)
+
+        except requests.RequestException:
+            pass
+
+    queue = [target_url]
+    for _ in range(depth):
+        if stop_event.is_set():
+            break
+        next_queue = []
+        for url in queue:
+            fetch_links(url)
+            next_queue.extend(list(internal_links - visited_links))
+        queue = next_queue
+
+    print(f"{Fore.RED}\n[*] Third-Party (External) Links Found: {len(external_links)}{Style.RESET_ALL}")
+    for link in external_links:
+        print(f"{Fore.MAGENTA}[✔] {link}{Style.RESET_ALL}")
+
+    if output_file:
+        with open(output_file, "w") as f:
+            f.write("\n".join(external_links))
+
 
 # CLI Argument Parsing
 if __name__ == "__main__":
@@ -150,6 +204,9 @@ if __name__ == "__main__":
     parser.add_argument("-p", "--ports", help="Comma-separated list of ports or range (e.g., 22,80,443 or 1-50)")
     parser.add_argument("--scantype", help="Nmap scan types (e.g., '-sS -sV -O')")
     parser.add_argument("--nse", help="NSE script or category (e.g., 'http-title' or 'vuln')")
+    parser.add_argument("-crawl", "--crawl", help="Crawl domain and find third-party links")
+    parser.add_argument("-depth", "--depth", type=int, default=2, help="How deep the crawler should go into the "
+                                                                       "website's internal links")
 
     args = parser.parse_args()
 
@@ -166,6 +223,8 @@ if __name__ == "__main__":
             run_nmap_scan(args.porttarget, args.ports, args.output, args.scantype)
         else:
             print(f"{Fore.RED}[!] Missing scan type or NSE script for port scanning.{Style.RESET_ALL}")
+    elif args.crawl:
+        crawl_domain(args.crawl, args.depth, args.output)
 
     else:
         print(f"{Fore.RED}[!] Invalid argument combination. Use -h for help.{Style.RESET_ALL}")
