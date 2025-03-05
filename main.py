@@ -19,6 +19,7 @@ init()
 # Global event to handle stopping threads immediately
 stop_event = threading.Event()
 
+
 def signal_handler(sig, frame):
     if not stop_event.is_set():
         print("\n[!] Scan interrupted by user. Stopping all threads immediately...\n")
@@ -26,11 +27,14 @@ def signal_handler(sig, frame):
         time.sleep(0.5)
         sys.exit(0)
 
+
 signal.signal(signal.SIGINT, signal_handler)
+
 
 def display_banner():
     print(Fore.RED + figlet_format("vorteX", font="slant") + Style.RESET_ALL)
     print(f"{Fore.MAGENTA}[✔] vorteX - The Ultimate Recon Tool{Style.RESET_ALL}\n")
+
 
 # Subdomain Enumeration
 def check_subdomain(subdomain, progress_bar, output_file):
@@ -48,19 +52,24 @@ def check_subdomain(subdomain, progress_bar, output_file):
     finally:
         progress_bar.update(1)
 
+
 def enumerate_subdomains(domain, wordlist, max_threads, output_file):
     display_banner()
-    print(f"{Fore.CYAN}[*] Enumerating subdomains for {domain} using {wordlist} with {max_threads} threads...\n{Style.RESET_ALL}")
+    print(
+        f"{Fore.CYAN}[*] Enumerating subdomains for {domain} using {wordlist} with {max_threads} threads...\n{Style.RESET_ALL}")
 
     with open(wordlist, "r") as file:
         subdomains = [line.strip() for line in file if line.strip() and not line.startswith("#")]
 
-    with tqdm(total=len(subdomains), desc="Scanning", bar_format="{l_bar}{bar} {n_fmt}/{total_fmt} [{elapsed}]", ncols=80) as progress_bar:
+    with tqdm(total=len(subdomains), desc="Scanning", bar_format="{l_bar}{bar} {n_fmt}/{total_fmt} [{elapsed}]",
+              ncols=80) as progress_bar:
         with ThreadPoolExecutor(max_workers=max_threads) as executor:
-            futures = {executor.submit(check_subdomain, f"{sub}.{domain}", progress_bar, output_file) for sub in subdomains}
+            futures = {executor.submit(check_subdomain, f"{sub}.{domain}", progress_bar, output_file) for sub in
+                       subdomains}
             for _ in as_completed(futures):
                 if stop_event.is_set():
                     break
+
 
 # Directory Fuzzing
 def check_directory(url, progress_bar, output_file):
@@ -79,19 +88,24 @@ def check_directory(url, progress_bar, output_file):
     finally:
         progress_bar.update(1)
 
+
 def directory_fuzzing(base_url, wordlist, max_threads, output_file):
     display_banner()
-    print(f"{Fore.CYAN}[*] Starting directory fuzzing on {base_url} using {wordlist} with {max_threads} threads...\n{Style.RESET_ALL}")
+    print(
+        f"{Fore.CYAN}[*] Starting directory fuzzing on {base_url} using {wordlist} with {max_threads} threads...\n{Style.RESET_ALL}")
 
     with open(wordlist, "r") as file:
         directories = [line.strip() for line in file if line.strip() and not line.startswith("#")]
 
-    with tqdm(total=len(directories), desc="Fuzzing", bar_format="{l_bar}{bar} {n_fmt}/{total_fmt} [{elapsed}]", ncols=80) as progress_bar:
+    with tqdm(total=len(directories), desc="Fuzzing", bar_format="{l_bar}{bar} {n_fmt}/{total_fmt} [{elapsed}]",
+              ncols=80) as progress_bar:
         with ThreadPoolExecutor(max_workers=max_threads) as executor:
-            futures = {executor.submit(check_directory, f"{base_url}/{dir}", progress_bar, output_file) for dir in directories}
+            futures = {executor.submit(check_directory, f"{base_url}/{dir}", progress_bar, output_file) for dir in
+                       directories}
             for _ in as_completed(futures):
                 if stop_event.is_set():
                     break
+
 
 # Nmap-based Port Scanning with Service, OS Detection, and NSE
 def run_nmap_scan(target, ports, output_file, scantype=None, nse_script=None):
@@ -117,7 +131,8 @@ def run_nmap_scan(target, ports, output_file, scantype=None, nse_script=None):
 
             if 'osmatch' in nm[host]:
                 for osmatch in nm[host]['osmatch']:
-                    tqdm.write(f"{Fore.YELLOW}[+] OS Match: {osmatch['name']} (Accuracy: {osmatch['accuracy']}%) {Style.RESET_ALL}")
+                    tqdm.write(
+                        f"{Fore.YELLOW}[+] OS Match: {osmatch['name']} (Accuracy: {osmatch['accuracy']}%) {Style.RESET_ALL}")
 
             for proto in nm[host].all_protocols():
                 tqdm.write(f"{Fore.CYAN}[+] Protocol: {proto}{Style.RESET_ALL}")
@@ -134,10 +149,11 @@ def run_nmap_scan(target, ports, output_file, scantype=None, nse_script=None):
     except Exception as e:
         tqdm.write(f"{Fore.RED}[!] Unexpected error: {e}{Style.RESET_ALL}")
 
+
 # Web Crawler for Third-Party Links
 def crawl_domain(target_url, depth, output_file):
     display_banner()
-    print(f"{Fore.CYAN}[*] Crawling domain {target_url} to find third-party links...{Style.RESET_ALL}\n")
+    print(f"{Fore.CYAN}[*] Crawling domain {target_url} to find third-party links (Depth: {depth})...{Style.RESET_ALL}\n")
 
     visited_links = set()
     internal_links = set()
@@ -186,6 +202,7 @@ def crawl_domain(target_url, depth, output_file):
             f.write("\n".join(external_links))
 
 
+
 # CLI Argument Parsing
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="vorteX - Advanced Recon & Fuzzing Tool")
@@ -204,9 +221,10 @@ if __name__ == "__main__":
     parser.add_argument("-p", "--ports", help="Comma-separated list of ports or range (e.g., 22,80,443 or 1-50)")
     parser.add_argument("--scantype", help="Nmap scan types (e.g., '-sS -sV -O')")
     parser.add_argument("--nse", help="NSE script or category (e.g., 'http-title' or 'vuln')")
-    parser.add_argument("-crawl", "--crawl", help="Crawl domain and find third-party links")
-    parser.add_argument("-depth", "--depth", type=int, default=2, help="How deep the crawler should go into the "
-                                                                       "website's internal links")
+
+    # Web Crawler
+    parser.add_argument("-crawl", help="Crawl domain and find third-party links")
+    parser.add_argument("--depth", type=int, default=2, help="Depth of crawling (default: 2)")
 
     args = parser.parse_args()
 
